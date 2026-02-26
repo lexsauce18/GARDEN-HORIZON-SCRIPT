@@ -1,0 +1,416 @@
+--[[ 
+    ALPHA HUB | GARDEN HORIZON (Rayfield)
+]]
+
+-- 1. WAIT FOR GAME TO LOAD
+repeat task.wait() until game:IsLoaded()
+
+-- 1.5 DEFINE PLAYER
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local VirtualUser = game:GetService("VirtualUser")
+
+-- 2. NOTIFY USER
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "Alpha Hub",
+    Text = "Loading Interface...",
+    Duration = 5,
+})
+
+-- 3. LOAD LIBRARY (Rayfield)
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- 4. CREATE WINDOW
+local Window = Rayfield:CreateWindow({
+    Name = "ALPHA HUB | Garden Horizon",
+    LoadingTitle = "Alpha Hub Scripts",
+    LoadingSubtitle = "by Alpha Hub Team",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "AlphaHubConfig",
+        FileName = "AlphaHub"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "https://discord.gg/Suk9CryHvx",
+        RememberJoins = true 
+    },
+    KeySystem = false, 
+})
+
+-- ==========================================
+-- TAB 1: MAIN (User Stats)
+-- ==========================================
+local MainTab = Window:CreateTab("Main", 4483345998)
+local InfoSection = MainTab:CreateSection("User Information")
+
+MainTab:CreateLabel("Username: " .. Player.Name)
+MainTab:CreateLabel("Display Name: " .. Player.DisplayName)
+MainTab:CreateLabel("User ID: " .. Player.UserId)
+MainTab:CreateLabel("Account Age: " .. Player.AccountAge .. " days")
+
+local CreditsSection = MainTab:CreateSection("Credits")
+MainTab:CreateLabel("Scripting: LexSauce / Alpha Hub Team")
+
+local SocialSection = MainTab:CreateSection("Community")
+MainTab:CreateButton({
+    Name = "Copy Discord Invite",
+    Callback = function()
+        setclipboard("https://discord.gg/avGM6WQKCx")
+        Rayfield:Notify({
+            Title = "Link Copied!",
+            Content = "The Discord invite has been copied to your clipboard.",
+            Duration = 5,
+            Image = 4483345998,
+        })
+    end,
+})
+
+-- ==========================================
+-- TAB 2: GAME TAB
+-- ==========================================
+local GameTab = Window:CreateTab("Game Tab", 4483345998)
+
+--- SEED SHOP VARIABLES ---
+local AllSeeds = {"Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry"}
+local BestSeeds = {"Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry"} 
+
+local SelectedSeeds = {}
+local AutoBuyEnabled, BuyAllEnabled, BuyBestEnabled = false, false, false
+
+local ShopCoords = Vector3.new(176.76, 204.01, 674.03)
+local SellCoords = Vector3.new(149.08, 204.03, 672.81)
+
+local PurchaseRemote = game:GetService("ReplicatedStorage"):WaitForChild("RemoteEvents"):WaitForChild("PurchaseShopItem")
+local SellRemote = game:GetService("ReplicatedStorage"):WaitForChild("RemoteEvents"):WaitForChild("SellItems")
+local ShopGui = Player:WaitForChild("PlayerGui"):WaitForChild("SeedShop")
+
+-- Helper to check stock via UI Text
+local function GetStock(seedName)
+    local success, stockLabel = pcall(function()
+        return ShopGui.Frame.ScrollingFrame[seedName].MainInfo.StockText
+    end)
+    
+    if success and stockLabel then
+        local stockAmount = string.match(stockLabel.Text, "%d+")
+        return tonumber(stockAmount) or 0
+    end
+    return 0
+end
+
+-- SMART BLINK Purchase Logic
+local function PerformPurchase(seedList, toggleFlag)
+    local character = Player.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    
+    if not hrp or #seedList == 0 then return end
+
+    local itemsToBuy = {}
+    for _, name in pairs(seedList) do
+        if GetStock(name) > 0 then
+            table.insert(itemsToBuy, name)
+        end
+    end
+
+    if #itemsToBuy > 0 then
+        local lastLocation = hrp.CFrame
+        hrp.CFrame = CFrame.new(ShopCoords)
+        task.wait(0.3)
+
+        for _, name in pairs(itemsToBuy) do
+            if not _G[toggleFlag] then break end
+            local itemName = name .. " Seed"
+            while _G[toggleFlag] and GetStock(name) > 0 do
+                PurchaseRemote:InvokeServer("SeedShop", itemName)
+                task.wait(0.01) 
+            end
+        end
+        hrp.CFrame = lastLocation
+    end
+end
+
+--- BUYING SECTION ---
+GameTab:CreateSection("Seed Selection")
+GameTab:CreateDropdown({
+   Name = "Select Seeds",
+   Options = AllSeeds,
+   CurrentOption = {},
+   MultipleOptions = true,
+   Callback = function(Options) SelectedSeeds = Options end,
+})
+
+GameTab:CreateToggle({
+   Name = "Auto-Buy Selected Seeds",
+   CurrentValue = false,
+   Flag = "CustomToggle", 
+   Callback = function(Value)
+       AutoBuyEnabled = Value
+       _G.CustomToggle = Value
+       if Value then
+           task.spawn(function()
+               while AutoBuyEnabled do
+                   PerformPurchase(SelectedSeeds, "CustomToggle")
+                   task.wait(1)
+               end
+           end)
+       end
+   end,
+})
+
+GameTab:CreateToggle({
+   Name = "Auto-Buy ALL Seeds",
+   CurrentValue = false,
+   Flag = "AllToggle", 
+   Callback = function(Value)
+       BuyAllEnabled = Value
+       _G.AllToggle = Value
+       if Value then
+           task.spawn(function()
+               while BuyAllEnabled do
+                   PerformPurchase(AllSeeds, "AllToggle")
+                   task.wait(1)
+               end
+           end)
+       end
+   end,
+})
+
+GameTab:CreateToggle({
+   Name = "Auto-Buy Best Seeds",
+   CurrentValue = false,
+   Flag = "BestToggle", 
+   Callback = function(Value)
+       BuyBestEnabled = Value
+       _G.BestToggle = Value
+       if Value then
+           task.spawn(function()
+               while BuyBestEnabled do
+                   PerformPurchase(BestSeeds, "BestToggle")
+                   task.wait(1)
+               end
+           end)
+       end
+   end,
+})
+
+--- GEAR SHOP SECTION ---
+local GearSection = GameTab:CreateSection("Auto Buy Gear")
+local SelectedGears = {}
+local GearAutoBuyEnabled = false
+local ShopCFrame = CFrame.new(211.40, 204.01, 608.80)
+
+local function GetGearStockCount()
+    local totalStock = 0
+    local scrollingFrame = Player.PlayerGui.GearShop.Frame.ScrollingFrame
+    
+    for _, gearName in ipairs(SelectedGears) do
+        local gearPath = scrollingFrame:FindFirstChild(gearName)
+        if gearPath and gearPath.MainInfo:FindFirstChild("StockText") then
+            local text = gearPath.MainInfo.StockText.Text
+            local stockNum = tonumber(string.match(text, "%d+")) or 0
+            if stockNum > 0 then
+                totalStock = totalStock + stockNum
+            end
+        end
+    end
+    return totalStock
+end
+
+local function RunGearOneBlinkBuy()
+    local char = Player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    
+    local root = char.HumanoidRootPart
+    local scrollingFrame = Player.PlayerGui.GearShop.Frame.ScrollingFrame
+    
+    if GetGearStockCount() > 0 then
+        local originalPos = root.CFrame
+        root.CFrame = ShopCFrame
+        task.wait(0.2)
+        
+        while GearAutoBuyEnabled and GetGearStockCount() > 0 do
+            for _, gearName in ipairs(SelectedGears) do
+                local gearPath = scrollingFrame:FindFirstChild(gearName)
+                if gearPath then
+                    local stockNum = tonumber(string.match(gearPath.MainInfo.StockText.Text, "%d+")) or 0
+                    if stockNum > 0 then
+                        pcall(function()
+                            PurchaseRemote:InvokeServer("GearShop", gearName)
+                        end)
+                    end
+                end
+            end
+            task.wait(0.1)
+        end
+        root.CFrame = originalPos
+    end
+end
+
+GameTab:CreateDropdown({
+    Name = "Select Gears",
+    Options = {"Watering Can", "Basic Sprinkler", "Harvest Bell", "Turbo Sprinkler", "Favorite Tool", "Super Sprinkler"},
+    CurrentOption = {},
+    MultipleOptions = true,
+    Callback = function(Options) SelectedGears = Options end,
+})
+
+GameTab:CreateToggle({
+    Name = "Auto Buy Gears",
+    CurrentValue = false,
+    Flag = "GearOneBlink",
+    Callback = function(Value)
+        GearAutoBuyEnabled = Value
+        if Value then
+            task.spawn(function()
+                while GearAutoBuyEnabled do
+                    RunGearOneBlinkBuy()
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end,
+})
+
+--- SELLING SECTION ---
+GameTab:CreateSection("Sell System")
+
+GameTab:CreateButton({
+   Name = "Sell Holding",
+   Interact = 'Teleport & Sell Hand',
+   Callback = function()
+       local character = Player.Character
+       local hrp = character and character:FindFirstChild("HumanoidRootPart")
+       local equippedItem = character and character:FindFirstChildOfClass("Tool")
+       
+       if hrp and equippedItem then
+           local lastLocation = hrp.CFrame
+           hrp.CFrame = CFrame.new(SellCoords)
+           task.wait(0.3)
+           pcall(function() SellRemote:InvokeServer("SellSingle") end)
+           hrp.CFrame = lastLocation
+       else
+           Rayfield:Notify({Title = "Action Failed", Content = "Ensure you are holding a plant!", Duration = 2})
+       end
+   end,
+})
+
+GameTab:CreateButton({
+   Name = "Sell All",
+   Interact = 'Teleport & Sell All',
+   Callback = function()
+       local character = Player.Character
+       local hrp = character and character:FindFirstChild("HumanoidRootPart")
+       
+       if hrp then
+           local lastLocation = hrp.CFrame
+           hrp.CFrame = CFrame.new(SellCoords)
+           task.wait(0.3)
+           pcall(function() SellRemote:InvokeServer("SellAll") end)
+           hrp.CFrame = lastLocation
+       end
+   end,
+})
+
+-- ==========================================
+-- TAB 3: PLAYER SETTINGS
+-- ==========================================
+local PlayerTab = Window:CreateTab("Player Settings", 4483345998)
+local PlayerSection = PlayerTab:CreateSection("Enhancements")
+
+local InfJumpEnabled = false
+local InstantInteractEnabled = false
+local AntiAfkEnabled = false
+
+-- Infinite Jump Logic
+UserInputService.JumpRequest:Connect(function()
+    if InfJumpEnabled then
+        local character = Player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+PlayerTab:CreateToggle({
+    Name = "Infinite Jump",
+    CurrentValue = false,
+    Flag = "InfJump",
+    Callback = function(Value)
+        InfJumpEnabled = Value
+    end,
+})
+
+-- Instant Interact Logic
+task.spawn(function()
+    while true do
+        if InstantInteractEnabled then
+            for _, v in pairs(game:GetDescendants()) do
+                if v:IsA("ProximityPrompt") then
+                    v.HoldDuration = 0
+                end
+            end
+        end
+        task.wait(1)
+    end
+end)
+
+PlayerTab:CreateToggle({
+    Name = "Instant Interact",
+    CurrentValue = false,
+    Flag = "InstantInteract",
+    Callback = function(Value)
+        InstantInteractEnabled = Value
+        if not Value then
+            for _, v in pairs(game:GetDescendants()) do
+                if v:IsA("ProximityPrompt") then
+                    v.HoldDuration = 0.5
+                end
+            end
+        end
+    end,
+})
+
+-- Anti-AFK Logic
+Player.Idled:Connect(function()
+    if AntiAfkEnabled then
+        VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    end
+end)
+
+PlayerTab:CreateToggle({
+    Name = "Anti-AFK",
+    CurrentValue = false,
+    Flag = "AntiAfk",
+    Callback = function(Value)
+        AntiAfkEnabled = Value
+        if Value then
+            Rayfield:Notify({
+                Title = "Anti-AFK Active",
+                Content = "Inactivity kick has been disabled.",
+                Duration = 3
+            })
+        end
+    end,
+})
+
+-- ==========================================
+-- TAB 4: SETTINGS
+-- ==========================================
+local SettingsTab = Window:CreateTab("Settings", 4483345998)
+SettingsTab:CreateButton({
+    Name = "Destroy UI",
+    Callback = function() Rayfield:Destroy() end,
+})
+
+SettingsTab:CreateLabel("Alpha Hub V1.0")
+Rayfield:LoadConfiguration()
+Rayfield:Notify({
+    Title = "Alpha Hub Loaded",
+    Content = "Welcome, " .. Player.DisplayName .. "!",
+    Duration = 5,
+    Image = 4483345998,
+})
