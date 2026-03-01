@@ -72,9 +72,132 @@ MainTab:CreateButton({
 -- ==========================================
 local GameTab = Window:CreateTab("Game Tab", 4483345998)
 
+--- ESP SECTION (REWORKED FOR GLOBAL POV) ---
+GameTab:CreateSection("ESP FILTERS")
+
+local ESP_Enabled = false
+local SelectedMutations = {}
+local ActiveObjects = {}
+
+local function RemoveESP(obj)
+    if ActiveObjects[obj] then
+        for _, v in pairs(ActiveObjects[obj]) do
+            if v then v:Destroy() end
+        end
+        ActiveObjects[obj] = nil
+    end
+end
+
+local function ApplyESP(target, matchedKeyword)
+    if ActiveObjects[target] then return end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "AlphaHighlight"
+    highlight.Adornee = target
+    highlight.FillColor = Color3.fromRGB(255, 255, 0) 
+    highlight.FillTransparency = 0.5
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = target
+    
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "AlphaLabel"
+    billboard.Size = UDim2.new(0, 150, 0, 50)
+    billboard.AlwaysOnTop = true
+    billboard.ExtentsOffset = Vector3.new(0, 2, 0)
+    billboard.Adornee = target
+    billboard.Parent = target
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = "[" .. matchedKeyword:upper() .. "]"
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextStrokeTransparency = 0
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 14
+    label.Parent = billboard
+    
+    ActiveObjects[target] = {highlight, billboard}
+end
+
+local function ProcessESPObject(obj)
+    -- Gather all attributes from the multiple sections found in your images
+    local mutVal = tostring(obj:GetAttribute("Mutation") or ""):lower()
+    local ripeVal = tostring(obj:GetAttribute("RipenessStage") or ""):lower()
+    local variantVal = tostring(obj:GetAttribute("Variant") or ""):lower()
+
+    local isMatched = false
+    local keywordFound = ""
+
+    for _, m in pairs(SelectedMutations) do
+        local filter = m:lower()
+        if string.find(mutVal, filter) or string.find(ripeVal, filter) or string.find(variantVal, filter) then
+            isMatched = true
+            keywordFound = m
+            break
+        end
+    end
+
+    if isMatched then
+        ApplyESP(obj, keywordFound)
+    else
+        RemoveESP(obj)
+    end
+end
+
+local function ScanClientPlants()
+    if not ESP_Enabled then return end
+    for _, item in pairs(workspace.ClientPlants:GetChildren()) do
+        ProcessESPObject(item)
+        for _, child in pairs(item:GetChildren()) do
+            if string.find(child.Name, "Fruit") then
+                ProcessESPObject(child)
+            end
+        end
+    end
+end
+
+-- Refresh Loop (Global Search)
+task.spawn(function()
+    while true do
+        if ESP_Enabled then
+            ScanClientPlants()
+        end
+        task.wait(1.5)
+    end
+end)
+
+GameTab:CreateDropdown({
+    Name = "Filter ESP",
+    Options = {
+        "Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck",
+        "Unripe", "Ripened", "Lush",
+        "Silver", "Gold"
+    },
+    CurrentOption = {},
+    MultipleOptions = true,
+    Callback = function(Options)
+        SelectedMutations = Options
+        for obj, _ in pairs(ActiveObjects) do RemoveESP(obj) end
+    end,
+})
+
+GameTab:CreateToggle({
+    Name = "Enable ESP",
+    CurrentValue = false,
+    Flag = "MutationESP",
+    Callback = function(Value)
+        ESP_Enabled = Value
+        if not Value then
+            for obj, _ in pairs(ActiveObjects) do RemoveESP(obj) end
+        end
+    end,
+})
+
 --- SEED SHOP VARIABLES ---
-local AllSeeds = {"Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry"}
-local BestSeeds = {"Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry"} 
+local AllSeeds = {"Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango"}
+local BestSeeds = {"Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango"} 
 
 local SelectedSeeds = {}
 local AutoBuyEnabled, BuyAllEnabled, BuyBestEnabled = false, false, false
@@ -249,7 +372,7 @@ end
 
 GameTab:CreateDropdown({
     Name = "Select Gears",
-    Options = {"Watering Can", "Basic Sprinkler", "Harvest Bell", "Turbo Sprinkler", "Favorite Tool", "Super Sprinkler"},
+    Options = {"Watering Can", "Basic Sprinkler", "Harvest Bell", "Turbo Sprinkler", "Favorite Tool", "Super Sprinkler", "Trowel"},
     CurrentOption = {},
     MultipleOptions = true,
     Callback = function(Options) SelectedGears = Options end,
@@ -310,6 +433,88 @@ GameTab:CreateButton({
            hrp.CFrame = lastLocation
        end
    end,
+})
+
+-- ==========================================
+-- TAB 3: AUTOMATION (Botanist Event)
+-- ==========================================
+local AutomationTab = Window:CreateTab("Event", 4483345998)
+local EventSection = AutomationTab:CreateSection("Event")
+
+local BotanistCoords = Vector3.new(213.43, 204.00, 621.11)
+local BotanistRemote = game:GetService("ReplicatedStorage"):WaitForChild("RemoteEvents"):WaitForChild("BotanistQuestRequest")
+
+-- Quest Info Label (Stays persistent until update)
+local QuestInfoLabel = AutomationTab:CreateLabel("Current Quest: None/Loading")
+
+task.spawn(function()
+    while true do
+        local success, questText = pcall(function()
+            return workspace.MapPhysical.Botanist.Botanist.Head.OverheadSpeech.CONTENT.Text
+        end)
+        
+        -- Only update label if questText is not empty or nil to keep the info persistent
+        if success and questText and questText ~= "" and questText ~= " " then
+            QuestInfoLabel:Set("Current Quest: " .. questText)
+        end
+        task.wait(1.5)
+    end
+end)
+
+AutomationTab:CreateButton({
+    Name = "Teleport to Botanist",
+    Info = "Teleport to the Quest NPC",
+    Callback = function()
+        local character = Player.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.CFrame = CFrame.new(BotanistCoords)
+        end
+    end,
+})
+
+AutomationTab:CreateButton({
+    Name = "Turn In Single (Holding)",
+    Callback = function()
+        local character = Player.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        local holding = character and character:FindFirstChildOfClass("Tool")
+        
+        if hrp then
+            if holding then
+                local lastPos = hrp.CFrame
+                hrp.CFrame = CFrame.new(BotanistCoords)
+                task.wait(0.5)
+                local args = {"TurnInSingle"}
+                BotanistRemote:InvokeServer(unpack(args))
+                task.wait(0.2)
+                hrp.CFrame = lastPos
+            else
+                Rayfield:Notify({
+                    Title = "Item Required",
+                    Content = "Please hold a plant first!",
+                    Duration = 3
+                })
+            end
+        end
+    end,
+})
+
+AutomationTab:CreateButton({
+    Name = "Turn In All (Best Match)",
+    Callback = function()
+        local character = Player.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local lastPos = hrp.CFrame
+            hrp.CFrame = CFrame.new(BotanistCoords)
+            task.wait(0.5)
+            local args = {"TurnInAll"}
+            BotanistRemote:InvokeServer(unpack(args))
+            task.wait(0.2)
+            hrp.CFrame = lastPos
+        end
+    end,
 })
 
 -- ==========================================
@@ -407,7 +612,7 @@ SettingsTab:CreateButton({
 })
 
 SettingsTab:CreateLabel("Alpha Hub V1.0")
-Rayfield:LoadConfiguration()
+
 Rayfield:Notify({
     Title = "Alpha Hub Loaded",
     Content = "Welcome, " .. Player.DisplayName .. "!",
