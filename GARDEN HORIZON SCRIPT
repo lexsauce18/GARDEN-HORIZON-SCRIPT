@@ -72,129 +72,6 @@ MainTab:CreateButton({
 -- ==========================================
 local GameTab = Window:CreateTab("Game Tab", 4483345998)
 
---- ESP SECTION (REWORKED FOR GLOBAL POV) ---
-GameTab:CreateSection("ESP FILTERS")
-
-local ESP_Enabled = false
-local SelectedMutations = {}
-local ActiveObjects = {}
-
-local function RemoveESP(obj)
-    if ActiveObjects[obj] then
-        for _, v in pairs(ActiveObjects[obj]) do
-            if v then v:Destroy() end
-        end
-        ActiveObjects[obj] = nil
-    end
-end
-
-local function ApplyESP(target, matchedKeyword)
-    if ActiveObjects[target] then return end
-
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "AlphaHighlight"
-    highlight.Adornee = target
-    highlight.FillColor = Color3.fromRGB(255, 255, 0) 
-    highlight.FillTransparency = 0.5
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Parent = target
-    
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "AlphaLabel"
-    billboard.Size = UDim2.new(0, 150, 0, 50)
-    billboard.AlwaysOnTop = true
-    billboard.ExtentsOffset = Vector3.new(0, 2, 0)
-    billboard.Adornee = target
-    billboard.Parent = target
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text = "[" .. matchedKeyword:upper() .. "]"
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.TextStrokeTransparency = 0
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
-    label.Parent = billboard
-    
-    ActiveObjects[target] = {highlight, billboard}
-end
-
-local function ProcessESPObject(obj)
-    -- Gather all attributes from the multiple sections found in your images
-    local mutVal = tostring(obj:GetAttribute("Mutation") or ""):lower()
-    local ripeVal = tostring(obj:GetAttribute("RipenessStage") or ""):lower()
-    local variantVal = tostring(obj:GetAttribute("Variant") or ""):lower()
-
-    local isMatched = false
-    local keywordFound = ""
-
-    for _, m in pairs(SelectedMutations) do
-        local filter = m:lower()
-        if string.find(mutVal, filter) or string.find(ripeVal, filter) or string.find(variantVal, filter) then
-            isMatched = true
-            keywordFound = m
-            break
-        end
-    end
-
-    if isMatched then
-        ApplyESP(obj, keywordFound)
-    else
-        RemoveESP(obj)
-    end
-end
-
-local function ScanClientPlants()
-    if not ESP_Enabled then return end
-    for _, item in pairs(workspace.ClientPlants:GetChildren()) do
-        ProcessESPObject(item)
-        for _, child in pairs(item:GetChildren()) do
-            if string.find(child.Name, "Fruit") then
-                ProcessESPObject(child)
-            end
-        end
-    end
-end
-
--- Refresh Loop (Global Search)
-task.spawn(function()
-    while true do
-        if ESP_Enabled then
-            ScanClientPlants()
-        end
-        task.wait(1.5)
-    end
-end)
-
-GameTab:CreateDropdown({
-    Name = "Filter ESP",
-    Options = {
-        "Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck",
-        "Unripe", "Ripened", "Lush",
-        "Silver", "Gold"
-    },
-    CurrentOption = {},
-    MultipleOptions = true,
-    Callback = function(Options)
-        SelectedMutations = Options
-        for obj, _ in pairs(ActiveObjects) do RemoveESP(obj) end
-    end,
-})
-
-GameTab:CreateToggle({
-    Name = "Enable ESP",
-    CurrentValue = false,
-    Flag = "MutationESP",
-    Callback = function(Value)
-        ESP_Enabled = Value
-        if not Value then
-            for obj, _ in pairs(ActiveObjects) do RemoveESP(obj) end
-        end
-    end,
-})
-
 --- SEED SHOP VARIABLES ---
 local AllSeeds = {"Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango"}
 local BestSeeds = {"Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango"} 
@@ -435,6 +312,100 @@ GameTab:CreateButton({
    end,
 })
 
+GameTab:CreateSection("Player Settings")
+
+local InfJumpEnabled = false
+local InstantInteractEnabled = false
+local AntiAfkEnabled = false
+
+-- Infinite Jump Logic
+UserInputService.JumpRequest:Connect(function()
+    if InfJumpEnabled then
+        local character = Player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+GameTab:CreateToggle({
+    Name = "Infinite Jump",
+    CurrentValue = false,
+    Flag = "InfJump",
+    Callback = function(Value)
+        InfJumpEnabled = Value
+    end,
+})
+
+-- New Instant Interact Logic
+local InstantInteractEnabled = false
+local ProximityPromptService = game:GetService("ProximityPromptService")
+
+local function instantPrompt(prompt)
+    if InstantInteractEnabled and prompt:IsA("ProximityPrompt") then
+        prompt.HoldDuration = 0
+    end
+end
+
+-- Apply to existing objects
+for _, obj in ipairs(workspace:GetDescendants()) do
+    instantPrompt(obj)
+end
+
+-- Listen for new objects
+workspace.DescendantAdded:Connect(function(obj)
+    instantPrompt(obj)
+end)
+
+-- UI Toggle Integration
+GameTab:CreateToggle({
+    Name = "Instant Interact",
+    CurrentValue = false,
+    Flag = "InstantInteract",
+    Callback = function(Value)
+        InstantInteractEnabled = Value
+        if Value then
+            -- Immediately update all currently in workspace when turned ON
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                instantPrompt(obj)
+            end
+        else
+            -- Reset to default (0.5) when turned OFF
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("ProximityPrompt") then
+                    obj.HoldDuration = 0.5
+                end
+            end
+        end
+    end,
+})
+
+-- Anti-AFK Logic
+Player.Idled:Connect(function()
+    if AntiAfkEnabled then
+        VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    end
+end)
+
+GameTab:CreateToggle({
+    Name = "Anti-AFK",
+    CurrentValue = false,
+    Flag = "AntiAfk",
+    Callback = function(Value)
+        AntiAfkEnabled = Value
+        if Value then
+            Rayfield:Notify({
+                Title = "Anti-AFK Active",
+                Content = "Inactivity kick has been disabled.",
+                Duration = 3
+            })
+        end
+    end,
+})
+
 -- ==========================================
 -- TAB 3: AUTOMATION (Botanist Event)
 -- ==========================================
@@ -518,88 +489,214 @@ AutomationTab:CreateButton({
 })
 
 -- ==========================================
--- TAB 3: PLAYER SETTINGS
+-- TAB 3: ESP TAB
 -- ==========================================
-local PlayerTab = Window:CreateTab("Player Settings", 4483345998)
-local PlayerSection = PlayerTab:CreateSection("Enhancements")
+local ESP = Window:CreateTab("ESP", 4483345998)
 
-local InfJumpEnabled = false
-local InstantInteractEnabled = false
-local AntiAfkEnabled = false
+-- ==========================================
+-- SHARED ESP UTILITIES
+-- ==========================================
+local ActiveObjects = {}
+local ActiveWeightObjects = {}
 
--- Infinite Jump Logic
-UserInputService.JumpRequest:Connect(function()
-    if InfJumpEnabled then
-        local character = Player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+local function ClearESP(obj, list)
+    if list[obj] then
+        for _, v in pairs(list[obj]) do
+            if v then v:Destroy() end
+        end
+        list[obj] = nil
+    end
+end
+
+-- ==========================================
+-- MUTATION ESP
+-- ==========================================
+
+local ESP_Enabled = false
+local SelectedMutations = {}
+
+local function ApplyMutationESP(target, labelText)
+    if ActiveObjects[target] then return end
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = target
+    highlight.FillColor = Color3.fromRGB(255, 255, 0)
+    highlight.Parent = target
+    
+    local billboard = Instance.new("BillboardGui")
+    billboard.Size = UDim2.new(0, 150, 0, 50)
+    billboard.AlwaysOnTop = true
+    -- CHANGED: ExtentsOffset set to 0 to center the text
+    billboard.ExtentsOffset = Vector3.new(0, 0, 0) 
+    billboard.Adornee = target
+    billboard.Parent = target
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextStrokeTransparency = 0
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 14
+    label.Parent = billboard
+    ActiveObjects[target] = {highlight, billboard}
+end
+
+local function ProcessMutation(obj, displayName)
+    local mut = tostring(obj:GetAttribute("Mutation") or ""):lower()
+    local ripe = tostring(obj:GetAttribute("RipenessStage") or ""):lower()
+    local var = tostring(obj:GetAttribute("Variant") or ""):lower()
+    
+    local isMatched = false
+    for _, m in pairs(SelectedMutations) do
+        local f = m:lower()
+        if string.find(mut, f) or string.find(ripe, f) or string.find(var, f) then 
+            isMatched = true 
+            break 
         end
     end
-end)
+    
+    if isMatched then
+        local txt = string.format("%s: %s,%s,%s", displayName:gsub("%d+", ""), 
+            tostring(obj:GetAttribute("Mutation") or "None"), 
+            tostring(obj:GetAttribute("Variant") or "None"), 
+            tostring(obj:GetAttribute("RipenessStage") or "None"))
+        ApplyMutationESP(obj, txt)
+    else
+        ClearESP(obj, ActiveObjects)
+    end
+end
 
-PlayerTab:CreateToggle({
-    Name = "Infinite Jump",
-    CurrentValue = false,
-    Flag = "InfJump",
-    Callback = function(Value)
-        InfJumpEnabled = Value
-    end,
-})
+-- ==========================================
+-- WEIGHT ESP
+-- ==========================================
 
--- Instant Interact Logic
+local WeightESP_Enabled = false
+local SelectedWeightPlants = {}
+
+local function ApplyWeightESP(target, labelText)
+    if ActiveWeightObjects[target] then 
+        if ActiveWeightObjects[target][2]:FindFirstChild("TextLabel") then
+            ActiveWeightObjects[target][2].TextLabel.Text = labelText
+        end
+        return 
+    end
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = target
+    highlight.FillColor = Color3.fromRGB(0, 255, 255)
+    highlight.FillTransparency = 0.5
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.Parent = target
+    
+    local billboard = Instance.new("BillboardGui")
+    billboard.Size = UDim2.new(0, 180, 0, 50)
+    billboard.AlwaysOnTop = true
+    -- CHANGED: ExtentsOffset set to 0 to center the text
+    billboard.ExtentsOffset = Vector3.new(0, 0, 0) 
+    billboard.Adornee = target
+    billboard.Parent = target
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(0, 255, 255)
+    label.TextStrokeTransparency = 0
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 14
+    label.Parent = billboard
+    ActiveWeightObjects[target] = {highlight, billboard}
+end
+
+local function ProcessWeight(obj, displayName)
+    local weight = obj:GetAttribute("PlantWeight") or obj:GetAttribute("FruitWeight")
+    if not weight then 
+        ClearESP(obj, ActiveWeightObjects) 
+        return 
+    end
+
+    local clean = displayName:gsub("%d+", "")
+    local isMatched = false
+    if table.find(SelectedWeightPlants, "All") then
+        isMatched = true
+    else
+        for _, p in pairs(SelectedWeightPlants) do
+            if string.find(clean:lower(), p:lower()) then isMatched = true break end
+        end
+    end
+
+    if isMatched then
+        local rounded = math.floor(tonumber(weight) * 100 + 0.5) / 100
+        ApplyWeightESP(obj, clean .. ": " .. tostring(rounded) .. " Kg")
+    else
+        ClearESP(obj, ActiveWeightObjects)
+    end
+end
+
+-- ==========================================
+-- OPTIMIZED SCANNER ENGINE
+-- ==========================================
 task.spawn(function()
     while true do
-        if InstantInteractEnabled then
-            for _, v in pairs(game:GetDescendants()) do
-                if v:IsA("ProximityPrompt") then
-                    v.HoldDuration = 0
+        if ESP_Enabled or WeightESP_Enabled then
+            local plants = workspace.ClientPlants:GetChildren()
+            for _, item in pairs(plants) do
+                local hasFruits = false
+                for _, child in pairs(item:GetChildren()) do
+                    if string.find(child.Name, "Fruit") then
+                        hasFruits = true
+                        if ESP_Enabled then ProcessMutation(child, item.Name) end
+                        if WeightESP_Enabled then ProcessWeight(child, item.Name) end
+                    end
+                end
+                
+                if not hasFruits then
+                    if ESP_Enabled then ProcessMutation(item, item.Name) end
+                    if WeightESP_Enabled then ProcessWeight(item, item.Name) end
                 end
             end
         end
-        task.wait(1)
+        task.wait(0.5) 
     end
 end)
 
-PlayerTab:CreateToggle({
-    Name = "Instant Interact",
+-- [UI CONTROLS]
+ESP:CreateSection("MUTATION ESP")
+
+ESP:CreateToggle({
+    Name = "Enable Mutation ESP",
     CurrentValue = false,
-    Flag = "InstantInteract",
     Callback = function(Value)
-        InstantInteractEnabled = Value
-        if not Value then
-            for _, v in pairs(game:GetDescendants()) do
-                if v:IsA("ProximityPrompt") then
-                    v.HoldDuration = 0.5
-                end
-            end
-        end
+        ESP_Enabled = Value
+        if not Value then for o, _ in pairs(ActiveObjects) do ClearESP(o, ActiveObjects) end end
     end,
 })
 
--- Anti-AFK Logic
-Player.Idled:Connect(function()
-    if AntiAfkEnabled then
-        VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-        task.wait(1)
-        VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-    end
-end)
+ESP:CreateDropdown({
+    Name = "Select Mutation",
+    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck", "Unripe", "Ripened", "Lush", "Silver", "Gold"},
+    CurrentOption = {},
+    MultipleOptions = true,
+    Callback = function(Options) SelectedMutations = Options end,
+})
 
-PlayerTab:CreateToggle({
-    Name = "Anti-AFK",
+ESP:CreateSection("WEIGHT ESP")
+
+ESP:CreateToggle({
+    Name = "Enable Weight ESP",
     CurrentValue = false,
-    Flag = "AntiAfk",
     Callback = function(Value)
-        AntiAfkEnabled = Value
-        if Value then
-            Rayfield:Notify({
-                Title = "Anti-AFK Active",
-                Content = "Inactivity kick has been disabled.",
-                Duration = 3
-            })
-        end
+        WeightESP_Enabled = Value
+        if not Value then for o, _ in pairs(ActiveWeightObjects) do ClearESP(o, ActiveWeightObjects) end end
     end,
+})
+
+ESP:CreateDropdown({
+    Name = "Select Plants",
+    Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch"},
+    CurrentOption = {},
+    MultipleOptions = true,
+    Callback = function(Options) SelectedWeightPlants = Options end,
 })
 
 -- ==========================================
