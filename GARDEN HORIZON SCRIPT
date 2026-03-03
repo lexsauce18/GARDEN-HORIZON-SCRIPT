@@ -497,7 +497,8 @@ local ESP = Window:CreateTab("ESP", 4483345998)
 -- SHARED ESP UTILITIES
 -- ==========================================
 local ActiveObjects = {}
-local Master_ESP_Enabled = false 
+local Mutation_ESP_Enabled = false 
+local Weight_ESP_Enabled = false
 
 local function ClearESP(obj)
     if ActiveObjects[obj] then
@@ -509,12 +510,12 @@ local function ClearESP(obj)
 end
 
 -- ==========================================
--- COMBINED ESP ENGINE (FIXED MUTATION FILTERING)
+-- COMBINED ESP ENGINE (STRICT LABEL FILTERING)
 -- ==========================================
-ESP:CreateSection("ESP MASTER CONTROL")
+ESP:CreateSection("ESP CONTROLS")
 
 local SelectedMutations = {}
-local SelectedWeightPlants = {}
+local SelectedPlantTypes = {}
 
 local function ApplyCombinedESP(target, labelText, isMutation)
     if ActiveObjects[target] then 
@@ -527,7 +528,6 @@ local function ApplyCombinedESP(target, labelText, isMutation)
 
     local highlight = Instance.new("Highlight")
     highlight.Adornee = target
-    -- Yellow if mutation found, Cyan if only weight
     highlight.FillColor = isMutation and Color3.fromRGB(255, 255, 0) or Color3.fromRGB(0, 255, 255)
     highlight.FillTransparency = 0.5
     highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
@@ -554,59 +554,62 @@ local function ApplyCombinedESP(target, labelText, isMutation)
 end
 
 local function ProcessCombined(obj, displayName)
-    if not Master_ESP_Enabled then return end
-    
     local cleanName = displayName:gsub("%d+", "")
     
-    -- 1. Check Mutation Logic (STRICT FILTERING)
-    local mutAttr = obj:GetAttribute("Mutation")
-    local ripeAttr = obj:GetAttribute("RipenessStage")
-    local varAttr = obj:GetAttribute("Variant")
-    
-    local foundTraits = {}
-    local mutMatched = false
-
-    -- Only add traits to the label if they are in the SelectedMutations list
-    for _, filterName in pairs(SelectedMutations) do
-        local f = filterName:lower()
-        
-        if mutAttr and tostring(mutAttr):lower() == f then
-            if not table.find(foundTraits, tostring(mutAttr)) then table.insert(foundTraits, tostring(mutAttr)) end
-            mutMatched = true
-        end
-        if ripeAttr and tostring(ripeAttr):lower() == f then
-            if not table.find(foundTraits, tostring(ripeAttr)) then table.insert(foundTraits, tostring(ripeAttr)) end
-            mutMatched = true
-        end
-        if varAttr and tostring(varAttr):lower() == f then
-            if not table.find(foundTraits, tostring(varAttr)) then table.insert(foundTraits, tostring(varAttr)) end
-            mutMatched = true
+    -- 1. Main Plant Type Filter
+    local plantMatched = false
+    if #SelectedPlantTypes == 0 or table.find(SelectedPlantTypes, "All") then
+        plantMatched = true
+    else
+        for _, p in pairs(SelectedPlantTypes) do
+            if string.find(cleanName:lower(), p:lower()) then plantMatched = true break end
         end
     end
 
-    -- 2. Check Weight Logic (UNCHANGED)
-    local weightAttr = obj:GetAttribute("PlantWeight") or obj:GetAttribute("FruitWeight")
-    local weightMatched = false
-    if weightAttr then
-        if table.find(SelectedWeightPlants, "All") then
-            weightMatched = true
-        else
-            for _, p in pairs(SelectedWeightPlants) do
-                if string.find(cleanName:lower(), p:lower()) then weightMatched = true break end
+    if not plantMatched then 
+        ClearESP(obj)
+        return 
+    end
+
+    -- 2. Selective Mutation Logic
+    local displayTraits = {}
+    local mutMatched = false
+
+    if Mutation_ESP_Enabled then
+        local mutAttr = tostring(obj:GetAttribute("Mutation") or ""):lower()
+        local ripeAttr = tostring(obj:GetAttribute("RipenessStage") or ""):lower()
+        local varAttr = tostring(obj:GetAttribute("Variant") or ""):lower()
+        
+        -- We only add the trait to displayTraits if the PLAYER selected it
+        for _, filterName in pairs(SelectedMutations) do
+            local f = filterName:lower()
+            
+            if (mutAttr ~= "" and string.find(mutAttr, f)) or 
+               (ripeAttr ~= "" and string.find(ripeAttr, f)) or 
+               (varAttr ~= "" and string.find(varAttr, f)) then
+                
+                -- Only insert the specific filter name selected by the player
+                if not table.find(displayTraits, filterName) then
+                    table.insert(displayTraits, filterName)
+                end
+                mutMatched = true
             end
         end
     end
 
-    -- 3. Combine Display
+    -- 3. Weight Logic
+    local weightAttr = obj:GetAttribute("PlantWeight") or obj:GetAttribute("FruitWeight")
+    local weightMatched = Weight_ESP_Enabled and weightAttr ~= nil
+
+    -- 4. Final Display Logic
     if mutMatched or weightMatched then
         local finalLabel = "[" .. cleanName .. "]: "
         
-        -- Only show Mutation brackets if a selected mutation was found
-        if mutMatched and #foundTraits > 0 then
-            finalLabel = finalLabel .. "[" .. table.concat(foundTraits, ",") .. "] "
+        -- Strict Mutation Display: Only shows what was checked in the menu
+        if mutMatched and #displayTraits > 0 then
+            finalLabel = finalLabel .. "[" .. table.concat(displayTraits, ",") .. "] "
         end
         
-        -- Add Weight part if matched
         if weightMatched then
             local rounded = math.floor(tonumber(weightAttr) * 100 + 0.5) / 100
             finalLabel = finalLabel .. "[" .. tostring(rounded) .. " kg]"
@@ -619,61 +622,77 @@ local function ProcessCombined(obj, displayName)
 end
 
 -- ==========================================
--- OPTIMIZED SCANNER ENGINE
+-- HIGH-SPEED SCANNER ENGINE
 -- ==========================================
 task.spawn(function()
     while true do
-        if Master_ESP_Enabled then
-            local plants = workspace.ClientPlants:GetChildren()
-            for _, item in pairs(plants) do
-                local hasFruits = false
-                for _, child in pairs(item:GetChildren()) do
-                    if string.find(child.Name, "Fruit") then
-                        hasFruits = true
-                        ProcessCombined(child, item.Name)
+        if Mutation_ESP_Enabled or Weight_ESP_Enabled then
+            local plantsFolder = workspace:FindFirstChild("ClientPlants")
+            if plantsFolder then
+                for _, item in pairs(plantsFolder:GetChildren()) do
+                    local fruits = {}
+                    for _, child in pairs(item:GetDescendants()) do
+                        if string.find(child.Name, "Fruit") then
+                            table.insert(fruits, child)
+                        end
+                    end
+                    
+                    if #fruits > 0 then
+                        for _, fruitPart in ipairs(fruits) do
+                            ProcessCombined(fruitPart, item.Name)
+                        end
+                    else
+                        ProcessCombined(item, item.Name)
                     end
                 end
-                
-                if not hasFruits then
-                    ProcessCombined(item, item.Name)
-                end
             end
+        else
+            for o, _ in pairs(ActiveObjects) do ClearESP(o) end
         end
-        task.wait(0.5) 
+        task.wait(0.2) 
     end
 end)
 
--- [COMBINED UI CONTROLS]
+-- ==========================================
+-- UI CONTROLS
+-- ==========================================
+
 ESP:CreateToggle({
-    Name = "Enable All ESP",
+    Name = "Enable Mutation ESP",
     CurrentValue = false,
     Callback = function(Value)
-        Master_ESP_Enabled = Value
-        if not Value then 
-            for o, _ in pairs(ActiveObjects) do ClearESP(o) end 
-        end
+        Mutation_ESP_Enabled = Value
+        if not Value then for o, _ in pairs(ActiveObjects) do ClearESP(o) end end
+    end,
+})
+
+ESP:CreateToggle({
+    Name = "Enable Weight ESP",
+    CurrentValue = false,
+    Callback = function(Value)
+        Weight_ESP_Enabled = Value
+        if not Value then for o, _ in pairs(ActiveObjects) do ClearESP(o) end end
     end,
 })
 
 ESP:CreateDropdown({
-    Name = "Filter Mutation",
-    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck", "Unripe", "Ripened", "Lush", "Silver", "Gold"},
-    CurrentOption = {},
+    Name = "Select Target Plant Types",
+    Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch"},
+    CurrentOption = {"All"},
     MultipleOptions = true,
     Callback = function(Options) 
-        SelectedMutations = Options 
-        -- Clear existing to force a re-scan with new strict filters
+        SelectedPlantTypes = Options 
         for o, _ in pairs(ActiveObjects) do ClearESP(o) end
     end,
 })
 
 ESP:CreateDropdown({
-    Name = "Filter Weight Plants",
-    Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch"},
+    Name = "Filter Specific Mutations",
+    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck", "Unripe", "Ripened", "Lush", "Silver", "Gold"},
     CurrentOption = {},
     MultipleOptions = true,
     Callback = function(Options) 
-        SelectedWeightPlants = Options 
+        SelectedMutations = Options 
         for o, _ in pairs(ActiveObjects) do ClearESP(o) end
     end,
 })
