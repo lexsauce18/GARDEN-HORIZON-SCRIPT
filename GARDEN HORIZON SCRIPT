@@ -497,101 +497,45 @@ local ESP = Window:CreateTab("ESP", 4483345998)
 -- SHARED ESP UTILITIES
 -- ==========================================
 local ActiveObjects = {}
-local ActiveWeightObjects = {}
+local Master_ESP_Enabled = false 
 
-local function ClearESP(obj, list)
-    if list[obj] then
-        for _, v in pairs(list[obj]) do
+local function ClearESP(obj)
+    if ActiveObjects[obj] then
+        for _, v in pairs(ActiveObjects[obj]) do
             if v then v:Destroy() end
         end
-        list[obj] = nil
+        ActiveObjects[obj] = nil
     end
 end
 
 -- ==========================================
--- MUTATION ESP
+-- COMBINED ESP ENGINE (FIXED MUTATION FILTERING)
 -- ==========================================
+ESP:CreateSection("ESP MASTER CONTROL")
 
-local ESP_Enabled = false
 local SelectedMutations = {}
-
-local function ApplyMutationESP(target, labelText)
-    if ActiveObjects[target] then return end
-    local highlight = Instance.new("Highlight")
-    highlight.Adornee = target
-    highlight.FillColor = Color3.fromRGB(255, 255, 0)
-    highlight.Parent = target
-    
-    local billboard = Instance.new("BillboardGui")
-    billboard.Size = UDim2.new(0, 150, 0, 50)
-    billboard.AlwaysOnTop = true
-    -- CHANGED: ExtentsOffset set to 0 to center the text
-    billboard.ExtentsOffset = Vector3.new(0, 0, 0) 
-    billboard.Adornee = target
-    billboard.Parent = target
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text = labelText
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.TextStrokeTransparency = 0
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
-    label.Parent = billboard
-    ActiveObjects[target] = {highlight, billboard}
-end
-
-local function ProcessMutation(obj, displayName)
-    local mut = tostring(obj:GetAttribute("Mutation") or ""):lower()
-    local ripe = tostring(obj:GetAttribute("RipenessStage") or ""):lower()
-    local var = tostring(obj:GetAttribute("Variant") or ""):lower()
-    
-    local isMatched = false
-    for _, m in pairs(SelectedMutations) do
-        local f = m:lower()
-        if string.find(mut, f) or string.find(ripe, f) or string.find(var, f) then 
-            isMatched = true 
-            break 
-        end
-    end
-    
-    if isMatched then
-        local txt = string.format("%s: %s,%s,%s", displayName:gsub("%d+", ""), 
-            tostring(obj:GetAttribute("Mutation") or "None"), 
-            tostring(obj:GetAttribute("Variant") or "None"), 
-            tostring(obj:GetAttribute("RipenessStage") or "None"))
-        ApplyMutationESP(obj, txt)
-    else
-        ClearESP(obj, ActiveObjects)
-    end
-end
-
--- ==========================================
--- WEIGHT ESP
--- ==========================================
-
-local WeightESP_Enabled = false
 local SelectedWeightPlants = {}
 
-local function ApplyWeightESP(target, labelText)
-    if ActiveWeightObjects[target] then 
-        if ActiveWeightObjects[target][2]:FindFirstChild("TextLabel") then
-            ActiveWeightObjects[target][2].TextLabel.Text = labelText
+local function ApplyCombinedESP(target, labelText, isMutation)
+    if ActiveObjects[target] then 
+        local billboard = ActiveObjects[target][2]
+        if billboard and billboard:FindFirstChild("TextLabel") then
+            billboard.TextLabel.Text = labelText
         end
         return 
     end
+
     local highlight = Instance.new("Highlight")
     highlight.Adornee = target
-    highlight.FillColor = Color3.fromRGB(0, 255, 255)
+    -- Yellow if mutation found, Cyan if only weight
+    highlight.FillColor = isMutation and Color3.fromRGB(255, 255, 0) or Color3.fromRGB(0, 255, 255)
     highlight.FillTransparency = 0.5
     highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
     highlight.Parent = target
     
     local billboard = Instance.new("BillboardGui")
-    billboard.Size = UDim2.new(0, 180, 0, 50)
+    billboard.Size = UDim2.new(0, 250, 0, 50) 
     billboard.AlwaysOnTop = true
-    -- CHANGED: ExtentsOffset set to 0 to center the text
     billboard.ExtentsOffset = Vector3.new(0, 0, 0) 
     billboard.Adornee = target
     billboard.Parent = target
@@ -600,36 +544,77 @@ local function ApplyWeightESP(target, labelText)
     label.Size = UDim2.new(1, 0, 1, 0)
     label.BackgroundTransparency = 1
     label.Text = labelText
-    label.TextColor3 = Color3.fromRGB(0, 255, 255)
-    label.TextStrokeTransparency = 0
+    label.TextColor3 = Color3.fromRGB(255, 255, 255) 
+    label.TextStrokeTransparency = 0.3
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
+    label.TextSize = 12
     label.Parent = billboard
-    ActiveWeightObjects[target] = {highlight, billboard}
+    ActiveObjects[target] = {highlight, billboard}
 end
 
-local function ProcessWeight(obj, displayName)
-    local weight = obj:GetAttribute("PlantWeight") or obj:GetAttribute("FruitWeight")
-    if not weight then 
-        ClearESP(obj, ActiveWeightObjects) 
-        return 
-    end
+local function ProcessCombined(obj, displayName)
+    if not Master_ESP_Enabled then return end
+    
+    local cleanName = displayName:gsub("%d+", "")
+    
+    -- 1. Check Mutation Logic (STRICT FILTERING)
+    local mutAttr = obj:GetAttribute("Mutation")
+    local ripeAttr = obj:GetAttribute("RipenessStage")
+    local varAttr = obj:GetAttribute("Variant")
+    
+    local foundTraits = {}
+    local mutMatched = false
 
-    local clean = displayName:gsub("%d+", "")
-    local isMatched = false
-    if table.find(SelectedWeightPlants, "All") then
-        isMatched = true
-    else
-        for _, p in pairs(SelectedWeightPlants) do
-            if string.find(clean:lower(), p:lower()) then isMatched = true break end
+    -- Only add traits to the label if they are in the SelectedMutations list
+    for _, filterName in pairs(SelectedMutations) do
+        local f = filterName:lower()
+        
+        if mutAttr and tostring(mutAttr):lower() == f then
+            if not table.find(foundTraits, tostring(mutAttr)) then table.insert(foundTraits, tostring(mutAttr)) end
+            mutMatched = true
+        end
+        if ripeAttr and tostring(ripeAttr):lower() == f then
+            if not table.find(foundTraits, tostring(ripeAttr)) then table.insert(foundTraits, tostring(ripeAttr)) end
+            mutMatched = true
+        end
+        if varAttr and tostring(varAttr):lower() == f then
+            if not table.find(foundTraits, tostring(varAttr)) then table.insert(foundTraits, tostring(varAttr)) end
+            mutMatched = true
         end
     end
 
-    if isMatched then
-        local rounded = math.floor(tonumber(weight) * 100 + 0.5) / 100
-        ApplyWeightESP(obj, clean .. ": " .. tostring(rounded) .. " Kg")
+    -- 2. Check Weight Logic (UNCHANGED)
+    local weightAttr = obj:GetAttribute("PlantWeight") or obj:GetAttribute("FruitWeight")
+    local weightMatched = false
+    if weightAttr then
+        if table.find(SelectedWeightPlants, "All") then
+            weightMatched = true
+        else
+            for _, p in pairs(SelectedWeightPlants) do
+                if string.find(cleanName:lower(), p:lower()) then weightMatched = true break end
+            end
+        end
+    end
+
+    -- 3. Combine Display
+    if mutMatched or weightMatched then
+        local finalLabel = "[" .. cleanName .. "]: "
+        
+        -- Only show Mutation brackets if a selected mutation was found
+        if mutMatched and #foundTraits > 0 then
+            finalLabel = finalLabel .. "[" .. table.concat(foundTraits, ",") .. "] "
+        end
+        
+        -- Add Weight part if matched
+        if weightMatched then
+            local rounded = math.floor(tonumber(weightAttr) * 100 + 0.5) / 100
+            finalLabel = finalLabel .. "[" .. tostring(rounded) .. " kg]"
+        end
+        
+        ApplyCombinedESP(obj, finalLabel, mutMatched)
     else
-        ClearESP(obj, ActiveWeightObjects)
+        ClearESP(obj)
     end
 end
 
@@ -638,21 +623,19 @@ end
 -- ==========================================
 task.spawn(function()
     while true do
-        if ESP_Enabled or WeightESP_Enabled then
+        if Master_ESP_Enabled then
             local plants = workspace.ClientPlants:GetChildren()
             for _, item in pairs(plants) do
                 local hasFruits = false
                 for _, child in pairs(item:GetChildren()) do
                     if string.find(child.Name, "Fruit") then
                         hasFruits = true
-                        if ESP_Enabled then ProcessMutation(child, item.Name) end
-                        if WeightESP_Enabled then ProcessWeight(child, item.Name) end
+                        ProcessCombined(child, item.Name)
                     end
                 end
                 
                 if not hasFruits then
-                    if ESP_Enabled then ProcessMutation(item, item.Name) end
-                    if WeightESP_Enabled then ProcessWeight(item, item.Name) end
+                    ProcessCombined(item, item.Name)
                 end
             end
         end
@@ -660,43 +643,39 @@ task.spawn(function()
     end
 end)
 
--- [UI CONTROLS]
-ESP:CreateSection("MUTATION ESP")
-
+-- [COMBINED UI CONTROLS]
 ESP:CreateToggle({
-    Name = "Enable Mutation ESP",
+    Name = "Enable All ESP",
     CurrentValue = false,
     Callback = function(Value)
-        ESP_Enabled = Value
-        if not Value then for o, _ in pairs(ActiveObjects) do ClearESP(o, ActiveObjects) end end
+        Master_ESP_Enabled = Value
+        if not Value then 
+            for o, _ in pairs(ActiveObjects) do ClearESP(o) end 
+        end
     end,
 })
 
 ESP:CreateDropdown({
-    Name = "Select Mutation",
+    Name = "Filter Mutation",
     Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck", "Unripe", "Ripened", "Lush", "Silver", "Gold"},
     CurrentOption = {},
     MultipleOptions = true,
-    Callback = function(Options) SelectedMutations = Options end,
-})
-
-ESP:CreateSection("WEIGHT ESP")
-
-ESP:CreateToggle({
-    Name = "Enable Weight ESP",
-    CurrentValue = false,
-    Callback = function(Value)
-        WeightESP_Enabled = Value
-        if not Value then for o, _ in pairs(ActiveWeightObjects) do ClearESP(o, ActiveWeightObjects) end end
+    Callback = function(Options) 
+        SelectedMutations = Options 
+        -- Clear existing to force a re-scan with new strict filters
+        for o, _ in pairs(ActiveObjects) do ClearESP(o) end
     end,
 })
 
 ESP:CreateDropdown({
-    Name = "Select Plants",
+    Name = "Filter Weight Plants",
     Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch"},
     CurrentOption = {},
     MultipleOptions = true,
-    Callback = function(Options) SelectedWeightPlants = Options end,
+    Callback = function(Options) 
+        SelectedWeightPlants = Options 
+        for o, _ in pairs(ActiveObjects) do ClearESP(o) end
+    end,
 })
 
 -- ==========================================
