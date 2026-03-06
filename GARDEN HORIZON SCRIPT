@@ -471,19 +471,34 @@ AutomationTab:CreateButton({
     end,
 })
 
-AutomationTab:CreateButton({
-    Name = "Turn In All (Best Match)",
-    Callback = function()
-        local character = Player.Character
-        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local lastPos = hrp.CFrame
-            hrp.CFrame = CFrame.new(BotanistCoords)
-            task.wait(0.5)
-            local args = {"TurnInAll"}
-            BotanistRemote:InvokeServer(unpack(args))
-            task.wait(0.2)
-            hrp.CFrame = lastPos
+local TurnInAllEnabled = false
+AutomationTab:CreateToggle({
+    Name = "Auto Turn In All (Toggle)",
+    CurrentValue = false,
+    Flag = "ToggleTurnInAll", 
+    Callback = function(Value)
+        TurnInAllEnabled = Value
+        if TurnInAllEnabled then
+            task.spawn(function()
+                while TurnInAllEnabled do
+                    local character = Player.Character
+                    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local lastPos = hrp.CFrame
+                        hrp.CFrame = CFrame.new(BotanistCoords)
+                        task.wait(0.5)
+                        
+                        -- Check again before invoking in case toggle was turned off during wait
+                        if TurnInAllEnabled then
+                            local args = {"TurnInAll"}
+                            BotanistRemote:InvokeServer(unpack(args))
+                            task.wait(0.2)
+                            hrp.CFrame = lastPos
+                        end
+                    end
+                    task.wait(1) -- Delay between auto-turn-ins to prevent lag/kick
+                end
+            end)
         end
     end,
 })
@@ -514,8 +529,10 @@ end
 -- ==========================================
 ESP:CreateSection("ESP CONTROLS")
 
-local SelectedMutations = {}
 local SelectedPlantTypes = {}
+local SelectedMutations = {}
+local SelectedRipeness = {}
+local SelectedVariants = {}
 
 local function ApplyCombinedESP(target, labelText, isMutation)
     if ActiveObjects[target] then 
@@ -556,7 +573,6 @@ end
 local function ProcessCombined(obj, displayName)
     local cleanName = displayName:gsub("%d+", "")
     
-    -- 1. Main Plant Type Filter
     local plantMatched = false
     if #SelectedPlantTypes == 0 or table.find(SelectedPlantTypes, "All") then
         plantMatched = true
@@ -571,7 +587,6 @@ local function ProcessCombined(obj, displayName)
         return 
     end
 
-    -- 2. Selective Mutation Logic
     local displayTraits = {}
     local mutMatched = false
 
@@ -580,50 +595,47 @@ local function ProcessCombined(obj, displayName)
         local ripeAttr = tostring(obj:GetAttribute("RipenessStage") or ""):lower()
         local varAttr = tostring(obj:GetAttribute("Variant") or ""):lower()
         
-        -- We only add the trait to displayTraits if the PLAYER selected it
-        for _, filterName in pairs(SelectedMutations) do
-            local f = filterName:lower()
-            
-            if (mutAttr ~= "" and string.find(mutAttr, f)) or 
-               (ripeAttr ~= "" and string.find(ripeAttr, f)) or 
-               (varAttr ~= "" and string.find(varAttr, f)) then
-                
-                -- Only insert the specific filter name selected by the player
-                if not table.find(displayTraits, filterName) then
-                    table.insert(displayTraits, filterName)
-                end
+        -- Check Mutations
+        for _, fName in pairs(SelectedMutations) do
+            if string.find(mutAttr, fName:lower()) then
+                if not table.find(displayTraits, fName) then table.insert(displayTraits, fName) end
+                mutMatched = true
+            end
+        end
+        -- Check Ripeness
+        for _, fName in pairs(SelectedRipeness) do
+            if string.find(ripeAttr, fName:lower()) then
+                if not table.find(displayTraits, fName) then table.insert(displayTraits, fName) end
+                mutMatched = true
+            end
+        end
+        -- Check Variants
+        for _, fName in pairs(SelectedVariants) do
+            if string.find(varAttr, fName:lower()) then
+                if not table.find(displayTraits, fName) then table.insert(displayTraits, fName) end
                 mutMatched = true
             end
         end
     end
 
-    -- 3. Weight Logic
     local weightAttr = obj:GetAttribute("PlantWeight") or obj:GetAttribute("FruitWeight")
     local weightMatched = Weight_ESP_Enabled and weightAttr ~= nil
 
-    -- 4. Final Display Logic
     if mutMatched or weightMatched then
         local finalLabel = "[" .. cleanName .. "]: "
-        
-        -- Strict Mutation Display: Only shows what was checked in the menu
         if mutMatched and #displayTraits > 0 then
             finalLabel = finalLabel .. "[" .. table.concat(displayTraits, ",") .. "] "
         end
-        
         if weightMatched then
             local rounded = math.floor(tonumber(weightAttr) * 100 + 0.5) / 100
             finalLabel = finalLabel .. "[" .. tostring(rounded) .. " kg]"
         end
-        
         ApplyCombinedESP(obj, finalLabel, mutMatched)
     else
         ClearESP(obj)
     end
 end
 
--- ==========================================
--- HIGH-SPEED SCANNER ENGINE
--- ==========================================
 task.spawn(function()
     while true do
         if Mutation_ESP_Enabled or Weight_ESP_Enabled then
@@ -636,11 +648,8 @@ task.spawn(function()
                             table.insert(fruits, child)
                         end
                     end
-                    
                     if #fruits > 0 then
-                        for _, fruitPart in ipairs(fruits) do
-                            ProcessCombined(fruitPart, item.Name)
-                        end
+                        for _, fruitPart in ipairs(fruits) do ProcessCombined(fruitPart, item.Name) end
                     else
                         ProcessCombined(item, item.Name)
                     end
@@ -654,7 +663,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- UI CONTROLS
+-- UI CONTROLS (SEPARATED LISTS)
 -- ==========================================
 
 ESP:CreateToggle({
@@ -676,7 +685,7 @@ ESP:CreateToggle({
 })
 
 ESP:CreateDropdown({
-    Name = "Select Target Plant Types",
+    Name = "Select Plant",
     Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch"},
     CurrentOption = {"All"},
     MultipleOptions = true,
@@ -687,8 +696,8 @@ ESP:CreateDropdown({
 })
 
 ESP:CreateDropdown({
-    Name = "Filter Specific Mutations",
-    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck", "Unripe", "Ripened", "Lush", "Silver", "Gold"},
+    Name = "ESP: Mutations",
+    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck"},
     CurrentOption = {},
     MultipleOptions = true,
     Callback = function(Options) 
@@ -697,18 +706,41 @@ ESP:CreateDropdown({
     end,
 })
 
+ESP:CreateDropdown({
+    Name = "ESP: Ripeness",
+    Options = {"Unripe", "Ripened", "Lush"},
+    CurrentOption = {},
+    MultipleOptions = true,
+    Callback = function(Options) 
+        SelectedRipeness = Options 
+        for o, _ in pairs(ActiveObjects) do ClearESP(o) end
+    end,
+})
+
+ESP:CreateDropdown({
+    Name = "ESP: Variants",
+    Options = {"Silver", "Gold"},
+    CurrentOption = {},
+    MultipleOptions = true,
+    Callback = function(Options) 
+        SelectedVariants = Options 
+        for o, _ in pairs(ActiveObjects) do ClearESP(o) end
+    end,
+})
+
 -- ==========================================
--- AUTO COLLECT SECTION (STRICT REMOTE)
+-- AUTO COLLECT SECTION (SMART REMOTE SWITCHING)
 -- ==========================================
-ESP:CreateSection("COLLECT FILTERS")
+ESP:CreateSection("AUTO COLLECT FRUITS")
 
 local AutoCollect_Enabled = false
 local Collect_Plants = {}
-local Collect_Mutations = {}
+local Filter_Mutations = {}
+local Filter_Ripeness = {}
+local Filter_Variants = {}
 local Collect_MinWeight = 0 
 local HarvestRemote = game:GetService("ReplicatedStorage"):WaitForChild("RemoteEvents"):WaitForChild("HarvestFruit")
 
--- 1. SELECTION UI
 ESP:CreateToggle({
     Name = "Enable Auto Collect",
     CurrentValue = false,
@@ -716,7 +748,7 @@ ESP:CreateToggle({
 })
 
 ESP:CreateDropdown({
-    Name = "Target Plant Types",
+    Name = "Select Plant",
     Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch"},
     CurrentOption = {},
     MultipleOptions = true,
@@ -724,15 +756,31 @@ ESP:CreateDropdown({
 })
 
 ESP:CreateDropdown({
-    Name = "Target Mutations/Variants",
-    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck", "Unripe", "Ripened", "Lush", "Silver", "Gold"},
+    Name = "Mutation",
+    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck"},
     CurrentOption = {},
     MultipleOptions = true,
-    Callback = function(Options) Collect_Mutations = Options end,
+    Callback = function(Options) Filter_Mutations = Options end,
+})
+
+ESP:CreateDropdown({
+    Name = "Ripened Stage",
+    Options = {"Unripe", "Ripened", "Lush"},
+    CurrentOption = {},
+    MultipleOptions = true,
+    Callback = function(Options) Filter_Ripeness = Options end,
+})
+
+ESP:CreateDropdown({
+    Name = "Variant",
+    Options = {"Silver", "Gold"},
+    CurrentOption = {},
+    MultipleOptions = true,
+    Callback = function(Options) Filter_Variants = Options end,
 })
 
 ESP:CreateSlider({
-    Name = "Min Weight Threshold (0 = Off)",
+    Name = "Choose Weight (0 = Off)",
     Range = {0, 10},
     Increment = 0.01,
     Suffix = "kg",
@@ -740,55 +788,48 @@ ESP:CreateSlider({
     Callback = function(Value) Collect_MinWeight = Value end,
 })
 
--- 2. ENHANCED REMOTE HARVESTING ENGINE (UPDATED TO UUID METHOD)
+-- 2. SMART HARVEST ENGINE (DETECTS SINGLE VS MULTI HARVEST)
 local function HarvestTarget(targetObj, parentName)
     local p = game.Players.LocalPlayer
     local char = p.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
 
-    -- Get the Uuid from the object attributes as seen in your image
-    local plantUuid = targetObj:GetAttribute("Uuid")
-    if not plantUuid then return end
+    local rawUuid = targetObj:GetAttribute("Uuid")
+    if not rawUuid then return end
+    
+    local anchorIndex = targetObj:GetAttribute("GrowthAnchorIndex")
+    local cleanUuid = string.split(rawUuid, ":")[1]
 
-    -- Find Anchor (Crops use PlantAnchor, Trees use FruitAnchor)
     local anchor = targetObj:FindFirstChild("PlantAnchor") or targetObj:FindFirstChild("FruitAnchor")
     if not anchor and targetObj.Parent then
         anchor = targetObj.Parent:FindFirstChild("PlantAnchor") or targetObj.Parent:FindFirstChild("FruitAnchor")
     end
     
     if anchor then
-        -- 1. Precision Teleport
         char.HumanoidRootPart.CFrame = CFrame.new(anchor.Position + Vector3.new(0, 1.5, 2), anchor.Position)
-        
-        -- 2. New Remote Fire Method using Uuid Table
         task.wait(0.1)
-        local args = {
-            {
-                {
-                    Uuid = plantUuid
-                }
-            }
-        }
-        HarvestRemote:FireServer(unpack(args))
         
-        -- 3. Short stability wait
+        local args = {}
+        if anchorIndex then
+            args = { { { Uuid = cleanUuid, GrowthAnchorIndex = anchorIndex } } }
+        else
+            args = { { { Uuid = cleanUuid } } }
+        end
+        
+        HarvestRemote:FireServer(unpack(args))
         task.wait(0.2) 
     end
 end
 
 -- 3. VALIDATION LOGIC
 local function ProcessCollect(obj, parentName)
-    -- Image checks: FullyGrown and not Favorited
     if obj:GetAttribute("FullyGrown") ~= true then return end
     if obj:GetAttribute("Favorited") == true then return end
 
-    -- Weight Check
     local currentWeight = obj:GetAttribute("FruitWeight") or obj:GetAttribute("PlantWeight") or 0
     if Collect_MinWeight > 0 and currentWeight < Collect_MinWeight then return end
 
     local cleanName = parentName:gsub("%d+", "")
-    
-    -- Plant Type Match
     local typeMatch = table.find(Collect_Plants, "All")
     if not typeMatch then
         for _, p in pairs(Collect_Plants) do
@@ -797,32 +838,33 @@ local function ProcessCollect(obj, parentName)
     end
     if not typeMatch then return end
 
-    -- Mutation Logic
-    local mutationCount = 0
-    for _ in pairs(Collect_Mutations) do mutationCount = mutationCount + 1 end
+    local hasMutFilter = #Filter_Mutations > 0
+    local hasRipeFilter = #Filter_Ripeness > 0
+    local hasVarFilter = #Filter_Variants > 0
 
-    if mutationCount == 0 then
-        -- Collect all of type
+    if not (hasMutFilter or hasRipeFilter or hasVarFilter) then
         HarvestTarget(obj, parentName)
     else
-        local mut = tostring(obj:GetAttribute("Mutation") or ""):lower()
-        local ripe = tostring(obj:GetAttribute("RipenessStage") or ""):lower()
-        local var = tostring(obj:GetAttribute("Variant") or ""):lower()
+        local mutAttr = tostring(obj:GetAttribute("Mutation") or ""):lower()
+        local ripeAttr = tostring(obj:GetAttribute("RipenessStage") or ""):lower()
+        local varAttr = tostring(obj:GetAttribute("Variant") or ""):lower()
         
-        local mutMatched = false
-        for _, selected in pairs(Collect_Mutations) do
-            local f = selected:lower()
-            if (mut ~= "" and string.find(mut, f)) or 
-               (ripe ~= "" and string.find(ripe, f)) or 
-               (var ~= "" and string.find(var, f)) then
-                mutMatched = true
-                break
+        local isTarget = false
+        for _, f in pairs(Filter_Mutations) do
+            if mutAttr ~= "" and string.find(mutAttr, f:lower()) then isTarget = true break end
+        end
+        if not isTarget then
+            for _, f in pairs(Filter_Ripeness) do
+                if ripeAttr ~= "" and string.find(ripeAttr, f:lower()) then isTarget = true break end
+            end
+        end
+        if not isTarget then
+            for _, f in pairs(Filter_Variants) do
+                if varAttr ~= "" and string.find(varAttr, f:lower()) then isTarget = true break end
             end
         end
 
-        if mutMatched then 
-            HarvestTarget(obj, parentName) 
-        end
+        if isTarget then HarvestTarget(obj, parentName) end
     end
 end
 
@@ -833,20 +875,14 @@ task.spawn(function()
             local plants = workspace.ClientPlants:GetChildren()
             for _, item in pairs(plants) do
                 if not AutoCollect_Enabled then break end
-                
                 local fruitsFound = false
-                -- Check for Tree Fruits
                 for _, child in pairs(item:GetChildren()) do
                     if string.find(child.Name, "Fruit") then
                         fruitsFound = true
                         ProcessCollect(child, item.Name)
                     end
                 end
-
-                -- Standard Crop
-                if not fruitsFound then
-                    ProcessCollect(item, item.Name)
-                end
+                if not fruitsFound then ProcessCollect(item, item.Name) end
             end
         end
         task.wait(0.5) 
