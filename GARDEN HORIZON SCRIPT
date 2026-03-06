@@ -889,6 +889,140 @@ task.spawn(function()
     end
 end)
 
+ESP:CreateSection("AUTO SHOVEL")
+
+-- Variables
+local targetPlant = nil
+local selectedVariant = "None" 
+local targetKg = 0
+local autoFarmEnabled = false
+local currentHighlight = nil
+local selecting = false
+
+-- Utility: Clean UUID
+local function cleanUuid(uuid)
+    if not uuid then return nil end
+    return string.split(tostring(uuid), ":")[1]
+end
+
+-- Status Label
+local StatusLabel = ESP:CreateLabel("Selected Plant: None")
+
+-- Selection & Deselection Logic
+local function startSelection()
+    selecting = true
+    Rayfield:Notify({Title = "Selection", Content = "Click a plant to Select/Unselect it!", Duration = 5})
+    
+    local mouse = game.Players.LocalPlayer:GetMouse()
+    local connection
+    connection = mouse.Button1Down:Connect(function()
+        local target = mouse.Target
+        if target and target:IsDescendantOf(workspace.ClientPlants) then
+            -- Find the Top-Level Parent
+            local plantObj = target
+            while plantObj.Parent ~= workspace.ClientPlants do
+                plantObj = plantObj.Parent
+            end
+            
+            -- If clicking the SAME plant, Unselect it
+            if targetPlant == plantObj then
+                targetPlant = nil
+                StatusLabel:Set("Selected Plant: None")
+                if currentHighlight then 
+                    currentHighlight:Destroy() 
+                    currentHighlight = nil
+                end
+                Rayfield:Notify({Title = "Unselected", Content = "Target cleared.", Duration = 3})
+            else
+                -- Select new plant
+                targetPlant = plantObj
+                StatusLabel:Set("Selected Plant: " .. targetPlant.Name)
+                if currentHighlight then currentHighlight:Destroy() end
+                
+                local highlight = Instance.new("Highlight")
+                highlight.Parent = targetPlant
+                highlight.FillColor = Color3.fromRGB(0, 255, 0)
+                currentHighlight = highlight
+                
+                Rayfield:Notify({Title = "Selected", Content = "Target: " .. targetPlant.Name, Duration = 3})
+            end
+            
+            selecting = false
+            connection:Disconnect()
+        end
+    end)
+end
+
+-- Main Farm Loop
+task.spawn(function()
+    while task.wait(0.1) do
+        if autoFarmEnabled and targetPlant and targetPlant.Parent == workspace.ClientPlants then
+            for _, fruit in ipairs(targetPlant:GetChildren()) do
+                if fruit.Name:find("Fruit") then
+                    local uuid = fruit:GetAttribute("Uuid")
+                    local weight = fruit:GetAttribute("FruitWeight") or 0
+                    local anchorIndex = fruit:GetAttribute("GrowthAnchorIndex")
+                    local isFavorited = fruit:GetAttribute("Favorited")
+                    local variant = fruit:GetAttribute("Variant") or "Normal"
+
+                    if uuid and anchorIndex and not isFavorited then
+                        local weightMet = (weight >= targetKg)
+                        local variantMet = (selectedVariant ~= "None" and variant == selectedVariant)
+
+                        if not weightMet and not variantMet then
+                            -- Instruction 6: Highlight disappears once shoveling begins
+                            if currentHighlight then 
+                                currentHighlight:Destroy() 
+                                currentHighlight = nil
+                            end
+
+                            -- Fire Shovel Remote (Teleportation removed)
+                            local cleanId = cleanUuid(uuid)
+                            game:GetService("ReplicatedStorage").RemoteEvents.RemovePlant:FireServer(cleanId, anchorIndex)
+                            task.wait(0.4) 
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+ESP:CreateButton({
+    Name = "Select / Unselect Plant",
+    Callback = function()
+        startSelection()
+    end,
+})
+
+ESP:CreateDropdown({
+    Name = "Keep Variant",
+    Options = {"None", "Gold", "Silver"}, 
+    CurrentOption = "None",
+    MultipleOptions = false,
+    Callback = function(Option)
+        selectedVariant = Option[1]
+    end,
+})
+
+ESP:CreateInput({
+    Name = "Target Weight (kg)",
+    PlaceholderText = "e.g. 2",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text)
+        targetKg = tonumber(Text) or 0
+    end,
+})
+
+ESP:CreateToggle({
+    Name = "Start Automate",
+    CurrentValue = false,
+    Flag = "FarmToggle",
+    Callback = function(Value)
+        autoFarmEnabled = Value
+    end,
+})
+
 -- ==========================================
 -- TAB 4: SETTINGS
 -- ==========================================
