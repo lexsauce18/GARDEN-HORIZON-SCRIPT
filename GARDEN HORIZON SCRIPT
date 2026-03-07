@@ -949,7 +949,7 @@ end
 
 -- Main Farm Loop
 task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait() do -- Removed 0.1 delay for faster scanning
         if autoFarmEnabled and #targetPlants > 0 then
             for i = #targetPlants, 1, -1 do
                 local plant = targetPlants[i]
@@ -976,7 +976,7 @@ task.spawn(function()
 
                                     local cleanId = cleanUuid(uuid)
                                     game:GetService("ReplicatedStorage").RemoteEvents.RemovePlant:FireServer(cleanId, anchorIndex)
-                                    task.wait(0.4) 
+                                    task.wait(0.05) -- Reduced from 0.4 to 0.05 for rapid removal
                                 end
                             end
                         end
