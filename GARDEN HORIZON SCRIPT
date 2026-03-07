@@ -686,7 +686,7 @@ ESP:CreateToggle({
 
 ESP:CreateDropdown({
     Name = "Select Plant",
-    Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch"},
+    Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch", "Twisted Sunflower", "Glowcorn", "Firefern", "Titan Bloom", "Glowvein", "Lostlight", "Roundmelon", "Inferno Pepper", "Glowflower", "Bluerose"},
     CurrentOption = {"All"},
     MultipleOptions = true,
     Callback = function(Options) 
@@ -697,7 +697,7 @@ ESP:CreateDropdown({
 
 ESP:CreateDropdown({
     Name = "ESP: Mutations",
-    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck"},
+    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck", "Salad", "Banned", "Party"},
     CurrentOption = {},
     MultipleOptions = true,
     Callback = function(Options) 
@@ -749,7 +749,7 @@ ESP:CreateToggle({
 
 ESP:CreateDropdown({
     Name = "Select Plant",
-    Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch"},
+    Options = {"All", "Carrot", "Corn", "Onion", "Strawberry", "Mushroom", "Beetroot", "Tomato", "Apple", "Rose", "Wheat", "Banana", "Plum", "Potato", "Cabbage", "Cherry", "Bamboo", "Mango", "Dawnfruit", "Dawnblossom", "Sunpetal", "Dandelion", "Bellpepper", "Goldenberry", "Amberpine", "Emberwood", "Pomegrante", "Birch", "Orange", "Olive", "Biohazard Melon", "Lablush Berry", "Starvine", "Radiant Petal", "Octobranch", "Twisted Sunflower", "Glowcorn", "Firefern", "Titan Bloom", "Glowvein", "Lostlight", "Roundmelon", "Inferno Pepper", "Glowflower", "Bluerose"},
     CurrentOption = {},
     MultipleOptions = true,
     Callback = function(Options) Collect_Plants = Options end,
@@ -757,7 +757,7 @@ ESP:CreateDropdown({
 
 ESP:CreateDropdown({
     Name = "Mutation",
-    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck"},
+    Options = {"Foggy", "Flooded", "Soaked", "Chilled", "Snowy", "Sand", "Tidal", "Frostbit", "Mossy", "Shocked", "Muddy", "Galactic", "Meteoric", "Nova", "Starstruck", "Salad", "Banned", "Party"},
     CurrentOption = {},
     MultipleOptions = true,
     Callback = function(Options) Filter_Mutations = Options end,
@@ -790,10 +790,6 @@ ESP:CreateSlider({
 
 -- 2. SMART HARVEST ENGINE (DETECTS SINGLE VS MULTI HARVEST)
 local function HarvestTarget(targetObj, parentName)
-    local p = game.Players.LocalPlayer
-    local char = p.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-
     local rawUuid = targetObj:GetAttribute("Uuid")
     if not rawUuid then return end
     
@@ -806,9 +802,6 @@ local function HarvestTarget(targetObj, parentName)
     end
     
     if anchor then
-        char.HumanoidRootPart.CFrame = CFrame.new(anchor.Position + Vector3.new(0, 1.5, 2), anchor.Position)
-        task.wait(0.1)
-        
         local args = {}
         if anchorIndex then
             args = { { { Uuid = cleanUuid, GrowthAnchorIndex = anchorIndex } } }
@@ -892,11 +885,11 @@ end)
 ESP:CreateSection("AUTO SHOVEL")
 
 -- Variables
-local targetPlant = nil
+local targetPlants = {} -- Changed to table for multiple targets
 local selectedVariant = "None" 
 local targetKg = 0
 local autoFarmEnabled = false
-local currentHighlight = nil
+local plantHighlights = {} -- Table to track highlights for multiple plants
 local selecting = false
 
 -- Utility: Clean UUID
@@ -906,7 +899,7 @@ local function cleanUuid(uuid)
 end
 
 -- Status Label
-local StatusLabel = ESP:CreateLabel("Selected Plant: None")
+local StatusLabel = ESP:CreateLabel("Selected Plants: 0")
 
 -- Selection & Deselection Logic
 local function startSelection()
@@ -924,29 +917,30 @@ local function startSelection()
                 plantObj = plantObj.Parent
             end
             
-            -- If clicking the SAME plant, Unselect it
-            if targetPlant == plantObj then
-                targetPlant = nil
-                StatusLabel:Set("Selected Plant: None")
-                if currentHighlight then 
-                    currentHighlight:Destroy() 
-                    currentHighlight = nil
+            -- Multi-select logic
+            if table.find(targetPlants, plantObj) then
+                -- Unselect if already in list
+                local index = table.find(targetPlants, plantObj)
+                table.remove(targetPlants, index)
+                
+                if plantHighlights[plantObj] then
+                    plantHighlights[plantObj]:Destroy()
+                    plantHighlights[plantObj] = nil
                 end
-                Rayfield:Notify({Title = "Unselected", Content = "Target cleared.", Duration = 3})
+                Rayfield:Notify({Title = "Unselected", Content = "Removed: " .. plantObj.Name, Duration = 3})
             else
-                -- Select new plant
-                targetPlant = plantObj
-                StatusLabel:Set("Selected Plant: " .. targetPlant.Name)
-                if currentHighlight then currentHighlight:Destroy() end
+                -- Add to selection
+                table.insert(targetPlants, plantObj)
                 
                 local highlight = Instance.new("Highlight")
-                highlight.Parent = targetPlant
+                highlight.Parent = plantObj
                 highlight.FillColor = Color3.fromRGB(0, 255, 0)
-                currentHighlight = highlight
+                plantHighlights[plantObj] = highlight
                 
-                Rayfield:Notify({Title = "Selected", Content = "Target: " .. targetPlant.Name, Duration = 3})
+                Rayfield:Notify({Title = "Selected", Content = "Added: " .. plantObj.Name, Duration = 3})
             end
             
+            StatusLabel:Set("Selected Plants: " .. #targetPlants)
             selecting = false
             connection:Disconnect()
         end
@@ -956,32 +950,41 @@ end
 -- Main Farm Loop
 task.spawn(function()
     while task.wait(0.1) do
-        if autoFarmEnabled and targetPlant and targetPlant.Parent == workspace.ClientPlants then
-            for _, fruit in ipairs(targetPlant:GetChildren()) do
-                if fruit.Name:find("Fruit") then
-                    local uuid = fruit:GetAttribute("Uuid")
-                    local weight = fruit:GetAttribute("FruitWeight") or 0
-                    local anchorIndex = fruit:GetAttribute("GrowthAnchorIndex")
-                    local isFavorited = fruit:GetAttribute("Favorited")
-                    local variant = fruit:GetAttribute("Variant") or "Normal"
+        if autoFarmEnabled and #targetPlants > 0 then
+            for i = #targetPlants, 1, -1 do
+                local plant = targetPlants[i]
+                
+                if plant and plant.Parent == workspace.ClientPlants then
+                    for _, fruit in ipairs(plant:GetChildren()) do
+                        if fruit.Name:find("Fruit") then
+                            local uuid = fruit:GetAttribute("Uuid")
+                            local weight = fruit:GetAttribute("FruitWeight") or 0
+                            local anchorIndex = fruit:GetAttribute("GrowthAnchorIndex")
+                            local isFavorited = fruit:GetAttribute("Favorited")
+                            local variant = fruit:GetAttribute("Variant") or "Normal"
 
-                    if uuid and anchorIndex and not isFavorited then
-                        local weightMet = (weight >= targetKg)
-                        local variantMet = (selectedVariant ~= "None" and variant == selectedVariant)
+                            if uuid and anchorIndex and not isFavorited then
+                                local weightMet = (weight >= targetKg)
+                                local variantMet = (selectedVariant ~= "None" and variant == selectedVariant)
 
-                        if not weightMet and not variantMet then
-                            -- Instruction 6: Highlight disappears once shoveling begins
-                            if currentHighlight then 
-                                currentHighlight:Destroy() 
-                                currentHighlight = nil
+                                if not weightMet and not variantMet then
+                                    -- Remove highlight when processing
+                                    if plantHighlights[plant] then 
+                                        plantHighlights[plant]:Destroy() 
+                                        plantHighlights[plant] = nil
+                                    end
+
+                                    local cleanId = cleanUuid(uuid)
+                                    game:GetService("ReplicatedStorage").RemoteEvents.RemovePlant:FireServer(cleanId, anchorIndex)
+                                    task.wait(0.4) 
+                                end
                             end
-
-                            -- Fire Shovel Remote (Teleportation removed)
-                            local cleanId = cleanUuid(uuid)
-                            game:GetService("ReplicatedStorage").RemoteEvents.RemovePlant:FireServer(cleanId, anchorIndex)
-                            task.wait(0.4) 
                         end
                     end
+                else
+                    -- Remove from list if plant no longer exists
+                    table.remove(targetPlants, i)
+                    StatusLabel:Set("Selected Plants: " .. #targetPlants)
                 end
             end
         end
