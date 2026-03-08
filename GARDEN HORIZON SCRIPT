@@ -410,7 +410,80 @@ GameTab:CreateToggle({
 -- TAB 3: AUTOMATION (Botanist Event)
 -- ==========================================
 local AutomationTab = Window:CreateTab("Event", 4483345998)
-local EventSection = AutomationTab:CreateSection("Event")
+
+local EventSection = AutomationTab:CreateSection("Auto Collect Manny Fruits")
+local AutoCollect = false
+local WorkspaceListener = nil
+
+-- The main collection logic
+local function StartCollectionProcess(folder)
+    while AutoCollect and folder and folder.Parent do
+        local items = folder:GetChildren()
+        
+        -- If folder is empty but still exists, wait a moment
+        if #items == 0 then 
+            task.wait(1) 
+        else
+            for _, item in ipairs(items) do
+                if not AutoCollect then break end
+                
+                -- Support both Parts and Models (looking for a BasePart to TP to)
+                local targetPart = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart")
+                
+                if targetPart then
+                    local player = game.Players.LocalPlayer
+                    local char = player.Character
+                    if char and char:FindFirstChild("HumanoidRootPart") then
+                        -- Teleport to the fruit
+                        char.HumanoidRootPart.CFrame = targetPart.CFrame
+                        
+                        -- Wait until this specific fruit is gone before moving to the next
+                        repeat task.wait(0.1) until not item:IsDescendantOf(workspace) or not AutoCollect
+                    end
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end
+
+local Toggle = AutomationTab:CreateToggle({
+   Name = "Auto Collect",
+   CurrentValue = false,
+   Flag = "EventToggle", 
+   Callback = function(Value)
+      AutoCollect = Value
+      
+      if AutoCollect then
+         -- 1. Check if the folder is ALREADY there when we toggle it on
+         local existingFolder = workspace:FindFirstChild("MannyMishapCollectibles")
+         if existingFolder then
+            task.spawn(function() StartCollectionProcess(existingFolder) end)
+         end
+         
+         -- 2. Watch Workspace for the folder to be created in the future
+         WorkspaceListener = workspace.ChildAdded:Connect(function(child)
+            if child.Name == "MannyMishapCollectibles" then
+               Rayfield:Notify({
+                  Title = "Event Started!",
+                  Content = "Folder detected. Starting collection...",
+                  Duration = 5,
+                  Image = 4483362458,
+               })
+               StartCollectionProcess(child)
+            end
+         end)
+      else
+         -- Stop listening when toggled off
+         if WorkspaceListener then
+            WorkspaceListener:Disconnect()
+            WorkspaceListener = nil
+         end
+      end
+   end,
+})
+
+local EventSection = AutomationTab:CreateSection("Maya Event")
 
 local BotanistCoords = Vector3.new(213.43, 204.00, 621.11)
 local BotanistRemote = game:GetService("ReplicatedStorage"):WaitForChild("RemoteEvents"):WaitForChild("BotanistQuestRequest")
