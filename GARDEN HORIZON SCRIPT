@@ -406,6 +406,16 @@ GameTab:CreateToggle({
     end,
 })
 
+local Button = GameTab:CreateButton({
+   Name = "Remove Bench (chairs)",
+   Callback = function()
+      local target = workspace:FindFirstChild("MapPhysical") and workspace.MapPhysical:FindFirstChild("Bench")
+      if target then
+         target:Destroy()
+      end
+   end,
+})
+
 -- ==========================================
 -- TAB 3: AUTOMATION (Botanist Event)
 -- ==========================================
@@ -1098,6 +1108,235 @@ ESP:CreateToggle({
         autoFarmEnabled = Value
     end,
 })
+
+-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = game:GetService("Players").LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- Remote Configuration
+local UseGearRemote = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("UseGear")
+
+-- Settings & Data
+local SelectedLocations = {} 
+local SelectionPending = false
+local AutoPlaceEnabled = false
+local ShowRange = false
+
+local FallbackRanges = {
+    ["Basic Sprinkler"] = 15,
+    ["Turbo Sprinkler"] = 22,
+    ["Super Sprinkler"] = 30,
+    ["None"] = 2.5
+}
+
+local SprinklerSettings = {
+    ["Basic Sprinkler"] = { Timer = 300 }, 
+    ["Turbo Sprinkler"] = { Timer = 600 },  
+    ["Super Sprinkler"] = { Timer = 900 },
+    ["None"] = { Timer = 999999 }
+}
+
+-- [[ CORE FUNCTIONS ]]
+
+local function getLiveRange(sprinklerName)
+    local success, result = pcall(function()
+        local emitter = workspace.ClientSprinklers:FindFirstChild(sprinklerName).GroundAnchor.PreviewOutline.ParticleEmitter
+        return emitter.Size.Keypoints[1].Value * 2.2 
+    end)
+    if success and result then return result end
+    return FallbackRanges[sprinklerName] or 2.5
+end
+
+local function createMarker(pos, num)
+    local part = Instance.new("Part")
+    part.Name = "AlphaHub_Circle_" .. num
+    part.Shape = Enum.PartType.Cylinder
+    part.Size = Vector3.new(0.05, 2.5, 2.5) 
+    part.Rotation = Vector3.new(0, 0, 90)
+    part.Position = pos + Vector3.new(0, 0.05, 0)
+    part.Anchored = true
+    part.CanCollide = false
+    part.Transparency = 0.5
+    part.Material = Enum.Material.Neon
+    part.Color = Color3.fromRGB(0, 255, 150)
+    part.Parent = workspace
+    
+    local textAnchor = Instance.new("Part")
+    textAnchor.Name = "AlphaHub_TextAnchor_" .. num
+    textAnchor.Size = Vector3.new(1, 1, 1)
+    textAnchor.Position = pos + Vector3.new(0, 4, 0)
+    textAnchor.Anchored = true
+    textAnchor.CanCollide = false
+    textAnchor.Transparency = 1
+    textAnchor.Parent = workspace
+    
+    local billboard = Instance.new("BillboardGui", textAnchor)
+    billboard.Name = "InfoUI"
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0, 150, 0, 75)
+    
+    local text = Instance.new("TextLabel", billboard)
+    text.Size = UDim2.new(1, 0, 1, 0)
+    text.BackgroundTransparency = 1
+    text.TextColor3 = Color3.new(1, 1, 1)
+    text.TextStrokeTransparency = 0
+    text.TextStrokeColor3 = Color3.new(0, 0, 0)
+    text.Text = "Slot " .. num .. "\nReady"
+    text.TextScaled = true
+    
+    return part, text, textAnchor
+end
+
+ESP:CreateSection("AUTO PLACE SPRINKLER")
+
+ESP:CreateButton({
+    Name = "Add Location (Click on Plot)",
+    Callback = function()
+        SelectionPending = true
+        Rayfield:Notify({Title = "Alpha Hub", Content = "Click your plot to mark the spot.", Duration = 2})
+    end,
+})
+
+ESP:CreateToggle({
+    Name = "Show Sprinkler Range",
+    CurrentValue = false,
+    Callback = function(Value)
+        ShowRange = Value
+        for i, data in pairs(SelectedLocations) do
+            if data.marker then
+                local size = Value and getLiveRange(data.sprinklerType) or 2.5
+                data.marker.Size = Vector3.new(0.05, size, size)
+                data.marker.Color = Value and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 150)
+                data.marker.Transparency = Value and 0.85 or 0.5
+            end
+        end
+    end,
+})
+
+ESP:CreateToggle({
+    Name = "Enable Auto Place Sprinkler (Loop)",
+    CurrentValue = false,
+    Callback = function(Value) 
+        AutoPlaceEnabled = Value 
+        if Value then
+            for i, data in pairs(SelectedLocations) do
+                if data.sprinklerType ~= "None" then data.lastPlaced = 0 end
+            end
+        end
+    end,
+})
+
+ESP:CreateButton({
+    Name = "Remove All Locations",
+    Callback = function()
+        for _, data in pairs(SelectedLocations) do
+            if data.marker then data.marker:Destroy() end
+            if data.anchor then data.anchor:Destroy() end
+        end
+        SelectedLocations = {} 
+        LocDropdown:Refresh({"None", "All"})
+    end,
+})
+
+LocDropdown = ESP:CreateDropdown({
+    Name = "Select Location Slot",
+    Options = {"None", "All"},
+    CurrentOption = {"None"},
+    Callback = function() end,
+})
+
+ESP:CreateDropdown({
+    Name = "Assign Sprinkler",
+    Options = {"None", "Basic Sprinkler", "Turbo Sprinkler", "Super Sprinkler"},
+    CurrentOption = {"None"},
+    Callback = function(Option)
+        local selection = LocDropdown.CurrentOption[1]
+        local sName = Option[1]
+        
+        local function applySettings(idx)
+            local data = SelectedLocations[idx]
+            if data then
+                data.sprinklerType = sName
+                data.duration = SprinklerSettings[sName].Timer
+                data.label.Text = sName == "None" and "Slot "..idx.."\n[Disabled]" or "Slot "..idx.."\n"..sName
+                
+                -- Update Range Live
+                if ShowRange then
+                    local rangeSize = getLiveRange(sName)
+                    data.marker.Size = Vector3.new(0.05, rangeSize, rangeSize)
+                    data.marker.Color = Color3.fromRGB(255, 0, 0)
+                end
+            end
+        end
+
+        if selection == "All" then
+            for i = 1, #SelectedLocations do applySettings(i) end
+        elseif tonumber(selection) then
+            applySettings(tonumber(selection))
+        end
+    end,
+})
+
+-- [[ CLICK HANDLER ]]
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed or not SelectionPending then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local target = Mouse.Target
+        if target and (target.Name == "PlantableArea" or target:IsDescendantOf(workspace.Plots)) then
+            SelectionPending = false
+            local pos = Mouse.Hit.p
+            local index = #SelectedLocations + 1
+            local marker, label, anchor = createMarker(pos, index)
+            table.insert(SelectedLocations, {
+                pos = pos, marker = marker, label = label, anchor = anchor,
+                sprinklerType = "None", duration = 999999, lastPlaced = 0
+            })
+            local list = {"None", "All"}
+            for i = 1, #SelectedLocations do table.insert(list, tostring(i)) end
+            LocDropdown:Refresh(list)
+        end
+    end
+end)
+
+-- [[ DEPLOYMENT ENGINE WITH SLOW STAGGER ]]
+
+task.spawn(function()
+    while true do
+        if AutoPlaceEnabled then
+            for i = 1, #SelectedLocations do
+                local data = SelectedLocations[i]
+                
+                if data and data.sprinklerType ~= "None" then
+                    local currentTime = tick()
+                    
+                    if (currentTime - data.lastPlaced) >= data.duration then
+                        -- Fire remote
+                        UseGearRemote:FireServer(data.sprinklerType, { position = data.pos })
+                        data.lastPlaced = currentTime
+                        
+                        -- Timer Visuals
+                        task.spawn(function()
+                            for t = data.duration, 0, -1 do
+                                if not AutoPlaceEnabled or not SelectedLocations[i] or data.sprinklerType == "None" then break end
+                                data.label.Text = string.format("Slot %d\n%s\n%02d:%02d", i, data.sprinklerType, math.floor(t/60), t%60)
+                                task.wait(1)
+                            end
+                            if SelectedLocations[i] then data.label.Text = "Slot "..i.."\nReady" end
+                        end)
+                        
+                        -- THE COOLDOWN FIX: Wait 1.5 seconds before moving to the next slot
+                        -- This prevents the game from blocking the second and third sprinkler
+                        task.wait(1.6) 
+                    end
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+end)
 
 -- ==========================================
 -- TAB 4: SETTINGS
