@@ -272,6 +272,72 @@ GameTab:CreateToggle({
     end,
 })
 
+local GearSection = GameTab:CreateSection("AUTO OPEN SEEDPACKS")
+
+-- Variables
+local selectedPack = "Gardener Seed Pack"
+local autoOpen = false
+local packNames = {"Dawn Seed Pack", "Gardener Seed Pack", "IGMA Seed Pack", "Royal Seed Pack", "Streak Seed Pack"}
+
+local Dropdown = GameTab:CreateDropdown({
+   Name = "Select Seed Pack",
+   Options = packNames,
+   CurrentOption = {"Gardener Seed Pack"},
+   MultipleOptions = false,
+   Callback = function(Option)
+      selectedPack = Option[1]
+   end,
+})
+
+local Toggle = GameTab:CreateToggle({
+   Name = "Enable Auto Open",
+   CurrentValue = false,
+   Callback = function(Value)
+      autoOpen = Value
+      
+      if autoOpen then
+          task.spawn(function()
+              while autoOpen do
+                  local player = game:GetService("Players").LocalPlayer
+                  local character = player.Character or player.CharacterAdded:Wait()
+                  local backpack = player.Backpack
+                  
+                  -- Find the tool in Backpack or Character
+                  local packItem = nil
+                  local allPossiblePlaces = {backpack, character}
+                  
+                  for _, location in pairs(allPossiblePlaces) do
+                      for _, item in pairs(location:GetChildren()) do
+                          if item:IsA("Tool") and item.Name:find(selectedPack) then
+                              packItem = item
+                              break
+                          end
+                      end
+                      if packItem then break end
+                  end
+
+                  -- Execution
+                  if packItem then
+                      -- Force hold the pack
+                      if packItem.Parent ~= character then
+                          packItem.Parent = character
+                      end
+
+                      -- Fire Remote to skip animation and open
+                      game:GetService("ReplicatedStorage"):WaitForChild("RemoteEvents"):WaitForChild("RequestSpin"):InvokeServer()
+                  else
+                      -- Auto-stop if pack is missing
+                      autoOpen = false
+                      break
+                  end
+                  
+                  task.wait(0.1) 
+              end
+          end)
+      end
+   end,
+})
+
 --- SELLING SECTION ---
 GameTab:CreateSection("Sell System")
 
@@ -430,17 +496,23 @@ local function StartCollectionProcess(folder)
     while AutoCollect and folder and folder.Parent do
         local items = folder:GetChildren()
         
-        -- If folder is empty but still exists, wait a moment
         if #items == 0 then 
             task.wait(1) 
         else
             for _, item in ipairs(items) do
                 if not AutoCollect then break end
                 
-                -- Support both Parts and Models (looking for a BasePart to TP to)
                 local targetPart = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart")
                 
                 if targetPart then
+                    -- 1. WAIT FOR FRUIT TO REACH GROUND
+                    -- We check if the velocity is near zero or if the fruit has landed
+                    local timeout = 0
+                    while targetPart.AssemblyLinearVelocity.Magnitude > 0.1 and timeout < 5 do
+                        task.wait(0.1)
+                        timeout = timeout + 0.1
+                    end
+
                     local player = game.Players.LocalPlayer
                     local char = player.Character
                     if char and char:FindFirstChild("HumanoidRootPart") then
@@ -449,6 +521,9 @@ local function StartCollectionProcess(folder)
                         
                         -- Wait until this specific fruit is gone before moving to the next
                         repeat task.wait(0.1) until not item:IsDescendantOf(workspace) or not AutoCollect
+                        
+                        -- 2. WAIT 0.5 SECONDS EVERY FRUIT
+                        task.wait(0.5)
                     end
                 end
             end
@@ -465,13 +540,11 @@ local Toggle = AutomationTab:CreateToggle({
       AutoCollect = Value
       
       if AutoCollect then
-         -- 1. Check if the folder is ALREADY there when we toggle it on
          local existingFolder = workspace:FindFirstChild("MannyMishapCollectibles")
          if existingFolder then
             task.spawn(function() StartCollectionProcess(existingFolder) end)
          end
          
-         -- 2. Watch Workspace for the folder to be created in the future
          WorkspaceListener = workspace.ChildAdded:Connect(function(child)
             if child.Name == "MannyMishapCollectibles" then
                Rayfield:Notify({
@@ -484,7 +557,6 @@ local Toggle = AutomationTab:CreateToggle({
             end
          end)
       else
-         -- Stop listening when toggled off
          if WorkspaceListener then
             WorkspaceListener:Disconnect()
             WorkspaceListener = nil
